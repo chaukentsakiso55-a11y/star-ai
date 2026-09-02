@@ -16,6 +16,11 @@ jobs:
           java-version: "17"
           cache: gradle
       - uses: gradle/actions/setup-gradle@v4
+      - name: Restore exact Star AI HTML
+        run: |
+          mkdir -p app/src/main/assets
+          cat .star_html_gz/part_*.b64 | base64 -d | gzip -d > app/src/main/assets/index.html
+          echo "2d7c97977d801bca849b6432fc4687b0a9168fba65748a1d43e7473c28e2b923  app/src/main/assets/index.html" | sha256sum -c -
       - run: chmod +x gradlew
       - run: ./gradlew testDebugUnitTest assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
