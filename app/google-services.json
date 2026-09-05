@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "272390946288",
+    "project_id": "star-ai-5b6c6",
+    "storage_bucket": "star-ai-5b6c6.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:272390946288:android:c9190790fc75d657b6b135",
+        "android_client_info": {
+          "package_name": "com.cyberpulse.starAI"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "272390946288-7milbjf6a4i9ovfngnja7997sf17d57r.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAw3LSnf4wbLz2hJCfSM3_pYdaebOdIcKE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "272390946288-7milbjf6a4i9ovfngnja7997sf17d57r.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
