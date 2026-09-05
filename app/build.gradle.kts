@@ -5,6 +5,10 @@ plugins {
     id("com.google.gms.google-services")
 }
 
+val starApiKey = providers.environmentVariable("STAR_AI_API_KEY").orNull.orEmpty()
+    .replace("\\", "\\\\")
+    .replace("\"", "\\\"")
+
 android {
     namespace = "com.cyberpulse.starai"
     compileSdk = 35
@@ -13,9 +17,10 @@ android {
         applicationId = "com.cyberpulse.starAI"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.0.0"
+        versionCode = 3
+        versionName = "1.0.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "STAR_AI_API_KEY", "\"$starApiKey\"")
     }
 
     buildTypes {
@@ -36,6 +41,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {
