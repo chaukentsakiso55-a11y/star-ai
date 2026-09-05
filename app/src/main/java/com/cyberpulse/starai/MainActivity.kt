@@ -106,7 +106,7 @@ class MainActivity : ComponentActivity() {
             override fun onShowFileChooser(
                 webView: WebView?,
                 filePathCallback: ValueCallback<Array<Uri>>?,
-                fileChooserParams: FileChooserParams?
+                fileChooserParams: WebChromeClient.FileChooserParams?
             ): Boolean {
                 this@MainActivity.filePathCallback?.onReceiveValue(null)
                 this@MainActivity.filePathCallback = filePathCallback
@@ -140,8 +140,22 @@ class MainActivity : ComponentActivity() {
             "star_html_1b.b64",
             "star_html_1c.b64",
             "star_html_1d.b64",
-            "star_html_2.b64",
-            "star_html_3.b64",
+            "star_html_2a.b64",
+            "star_html_2b1.b64",
+            "star_html_2b2.b64",
+            "star_html_2b3.b64",
+            "star_html_2b4.b64",
+            "star_html_2b5_1.b64",
+            "star_html_2b5_2.b64",
+            "star_html_2b5_3.b64",
+            "star_html_2b5_4.b64",
+            "star_html_2b5_5.b64",
+            "star_html_2c.b64",
+            "star_html_2d.b64",
+            "star_html_3a.b64",
+            "star_html_3b.b64",
+            "star_html_3c.b64",
+            "star_html_3d.b64",
             "star_html_4.b64"
         )
         val encoded = buildString {
