@@ -135,7 +135,21 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun decodeStarHtml(): String {
-        val compressed = Base64.decode(StarHtmlPayload.encoded, Base64.NO_WRAP)
+        val parts = listOf(
+            "star_html_1a.b64",
+            "star_html_1b.b64",
+            "star_html_1c.b64",
+            "star_html_1d.b64",
+            "star_html_2.b64",
+            "star_html_3.b64",
+            "star_html_4.b64"
+        )
+        val encoded = buildString {
+            parts.forEach { name ->
+                append(assets.open(name).bufferedReader(Charsets.US_ASCII).use { it.readText() })
+            }
+        }
+        val compressed = Base64.decode(encoded, Base64.DEFAULT)
         return GZIPInputStream(ByteArrayInputStream(compressed))
             .bufferedReader(Charsets.UTF_8)
             .use { it.readText() }
