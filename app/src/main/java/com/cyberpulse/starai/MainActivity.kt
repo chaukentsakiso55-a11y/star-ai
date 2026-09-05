@@ -26,6 +26,7 @@ import androidx.core.content.ContextCompat
 import java.io.ByteArrayInputStream
 import java.util.Locale
 import java.util.zip.GZIPInputStream
+import org.json.JSONArray
 import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
@@ -33,6 +34,19 @@ class MainActivity : ComponentActivity() {
     private var textToSpeech: TextToSpeech? = null
     private var ttsReady = false
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
+
+    private val librarySources = listOf(
+        LibrarySource(
+            id = "cyber_pulse_info",
+            name = "Cyber Pulse Info",
+            baseUrl = "https://cyber-pulse-info.netlify.app"
+        ),
+        LibrarySource(
+            id = "cyber_learn_projects",
+            name = "Cyber Learn Projects",
+            baseUrl = "https://cyber-learn-projects.netlify.app"
+        )
+    )
 
     private val speechLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -127,7 +141,7 @@ class MainActivity : ComponentActivity() {
         setContentView(webView)
         webView.loadDataWithBaseURL(
             "https://star.local/",
-            decodeStarHtml(),
+            injectRuntimeConfig(decodeStarHtml()),
             "text/html",
             "UTF-8",
             null
@@ -167,6 +181,38 @@ class MainActivity : ComponentActivity() {
         return GZIPInputStream(ByteArrayInputStream(compressed))
             .bufferedReader(Charsets.UTF_8)
             .use { it.readText() }
+    }
+
+    private fun injectRuntimeConfig(html: String): String {
+        val sourcesJson = librarySourcesJson()
+        val script = """
+            <script>
+            window.STAR_LIBRARY_SOURCES = $sourcesJson;
+            window.STAR_OFFLINE_LIBRARY_CONFIG = {
+              sources: window.STAR_LIBRARY_SOURCES,
+              sourceMode: 'cyber-pulse-reference-sites',
+              localFirst: true
+            };
+            </script>
+        """.trimIndent()
+        return if (html.contains("</head>", ignoreCase = true)) {
+            html.replaceFirst(Regex("</head>", RegexOption.IGNORE_CASE), "$script\n</head>")
+        } else {
+            "$script\n$html"
+        }
+    }
+
+    private fun librarySourcesJson(): String {
+        val array = JSONArray()
+        librarySources.forEach { source ->
+            array.put(
+                JSONObject()
+                    .put("id", source.id)
+                    .put("name", source.name)
+                    .put("baseUrl", source.baseUrl)
+            )
+        }
+        return array.toString()
     }
 
     private fun requestSpeech() {
@@ -239,5 +285,14 @@ class MainActivity : ComponentActivity() {
 
         @JavascriptInterface
         fun appVersion(): String = BuildConfig.VERSION_NAME
+
+        @JavascriptInterface
+        fun librarySources(): String = librarySourcesJson()
     }
+
+    data class LibrarySource(
+        val id: String,
+        val name: String,
+        val baseUrl: String
+    )
 }
