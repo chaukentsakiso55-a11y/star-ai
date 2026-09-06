@@ -1,5 +1,3 @@
-import java.util.Base64
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -7,17 +5,15 @@ plugins {
     id("com.google.gms.google-services")
 }
 
-val starApiKey = providers.environmentVariable("STAR_AI_API_KEY").orNull
-    ?.takeIf { it.isNotBlank() }
-    ?: "~".repeat(53)
-val starKeyMask = byteArrayOf(
-    0x53, 0x74, 0x61, 0x72, 0x41, 0x49, 0x2D, 0x4F, 0x66, 0x66, 0x6C, 0x69, 0x6E, 0x65, 0x21
-)
-val starKeyBytes = starApiKey.toByteArray(Charsets.UTF_8)
-val starKeyCipher = ByteArray(starKeyBytes.size) { index ->
-    (starKeyBytes[index].toInt() xor starKeyMask[index % starKeyMask.size].toInt()).toByte()
-}
-val starKeyBlob = Base64.getEncoder().encodeToString(starKeyCipher)
+// Obfuscated client credential blob. The plaintext credential is never stored
+// in this repository or exposed to the HTML/UI. MainActivity reconstructs it
+// only immediately before the native Gemini request.
+val starKeyBlob = listOf(
+    "EiVPMyNxfwFQKhocMV1s",
+    "YwVMCCoERB8nBQMRKiti",
+    "GkFMNggKSX0WSwAqDA5M",
+    "ChkDQTR7FTg="
+).joinToString("")
 
 android {
     namespace = "com.cyberpulse.starai"
@@ -27,8 +23,8 @@ android {
         applicationId = "com.cyberpulse.starAI"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.1.1"
+        versionCode = 6
+        versionName = "1.1.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "STAR_AI_KEY_BLOB", "\"$starKeyBlob\"")
     }
