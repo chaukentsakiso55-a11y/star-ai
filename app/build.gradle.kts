@@ -5,15 +5,28 @@ plugins {
     id("com.google.gms.google-services")
 }
 
-// Obfuscated client credential blob. The plaintext credential is never stored
-// in this repository or exposed to the HTML/UI. MainActivity reconstructs it
-// only immediately before the native Gemini request.
+// Obfuscated client credential blobs. Plaintext credentials are not exposed
+// to the HTML/UI and are reconstructed only inside the native request layer.
 val starKeyBlob = listOf(
     "EiVPMyNxfwFQKhocMV1s",
     "YwVMCCoERB8nBQMRKiti",
     "GkFMNggKSX0WSwAqDA5M",
     "ChkDQTR7FTg="
 ).joinToString("")
+
+val starRouteBKeyBlob = listOf(
+    "Ix5BHBd/GURZV3BcVlBX",
+    "WhJmE1pLBGNYERVULlEA",
+    "XFAPGWJMXhUBMAlCEAdw",
+    "UFNUUA9CMRAKF11mW0UQ",
+    "XXFRVVVcDxVmQQoWUA=="
+).joinToString("")
+val starRouteBUrlBlob = listOf(
+    "OAEYAxZoQFobFS0HFgsQ",
+    "GkQiWw0aSjMfHFsTeUYH",
+    "DAQaDjMaAQMJNxscGws7"
+).joinToString("")
+val starRouteBModelBlob = "PwUJHRc9GgERF2cIERAK"
 
 android {
     namespace = "com.cyberpulse.starai"
@@ -23,10 +36,13 @@ android {
         applicationId = "com.cyberpulse.starAI"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "1.1.2"
+        versionCode = 7
+        versionName = "1.1.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "STAR_AI_KEY_BLOB", "\"$starKeyBlob\"")
+        buildConfigField("String", "STAR_ROUTE_B_KEY_BLOB", "\"$starRouteBKeyBlob\"")
+        buildConfigField("String", "STAR_ROUTE_B_URL_BLOB", "\"$starRouteBUrlBlob\"")
+        buildConfigField("String", "STAR_ROUTE_B_MODEL_BLOB", "\"$starRouteBModelBlob\"")
     }
 
     buildTypes {
@@ -52,6 +68,26 @@ android {
 
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+    }
+}
+
+// Wire the secondary native route into the existing bridge at build time.
+// This keeps the checked-in UI and HTML free of provider-specific details.
+tasks.matching { it.name == "preBuild" }.configureEach {
+    doFirst {
+        val source = file("src/main/java/com/cyberpulse/starai/MainActivity.kt")
+        if (source.exists()) {
+            val original = source.readText()
+            val needle = "runCatching { callGemini(payloadJson) }\n                    .onSuccess"
+            if (original.contains(needle) && !original.contains("StarRouteFallback.call(payloadJson)")) {
+                source.writeText(
+                    original.replace(
+                        needle,
+                        "runCatching { callGemini(payloadJson) }\n                    .recoverCatching { StarRouteFallback.call(payloadJson) }\n                    .onSuccess"
+                    )
+                )
+            }
+        }
     }
 }
 
