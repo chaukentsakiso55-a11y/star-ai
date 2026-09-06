@@ -1,3 +1,5 @@
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -11,10 +13,11 @@ val starApiKey = providers.environmentVariable("STAR_AI_API_KEY").orNull
 val starKeyMask = byteArrayOf(
     0x53, 0x74, 0x61, 0x72, 0x41, 0x49, 0x2D, 0x4F, 0x66, 0x66, 0x6C, 0x69, 0x6E, 0x65, 0x21
 )
-val starKeyCipher = ByteArray(starApiKey.toByteArray(Charsets.UTF_8).size) { index ->
-    (starApiKey.toByteArray(Charsets.UTF_8)[index].toInt() xor starKeyMask[index % starKeyMask.size].toInt()).toByte()
+val starKeyBytes = starApiKey.toByteArray(Charsets.UTF_8)
+val starKeyCipher = ByteArray(starKeyBytes.size) { index ->
+    (starKeyBytes[index].toInt() xor starKeyMask[index % starKeyMask.size].toInt()).toByte()
 }
-val starKeyBlob = java.util.Base64.getEncoder().encodeToString(starKeyCipher)
+val starKeyBlob = Base64.getEncoder().encodeToString(starKeyCipher)
 
 android {
     namespace = "com.cyberpulse.starai"
