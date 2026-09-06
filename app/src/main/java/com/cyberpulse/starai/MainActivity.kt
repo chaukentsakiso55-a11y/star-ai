@@ -24,6 +24,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import java.io.ByteArrayInputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.Locale
 import java.util.zip.GZIPInputStream
 import org.json.JSONArray
@@ -193,6 +195,27 @@ class MainActivity : ComponentActivity() {
               sourceMode: 'cyber-pulse-reference-sites',
               localFirst: true
             };
+            window.__starNativePending = {};
+            window.__starNativeResolve = function(id, ok, payload){
+              var pending = window.__starNativePending[id];
+              if(!pending) return;
+              delete window.__starNativePending[id];
+              if(ok) pending.resolve(payload); else pending.reject(new Error(payload));
+            };
+            window.addEventListener('load', function(){
+              window.callLiveAPI = function(conversationMessages){
+                if(!window.StarNative || !window.StarNative.askGemini){
+                  return Promise.reject(new Error('Native Gemini bridge unavailable'));
+                }
+                var id = 'g' + Date.now() + Math.random().toString(16).slice(2);
+                var systemPrompt = (typeof state !== 'undefined' && state.systemPrompt) ? state.systemPrompt : '';
+                var payload = JSON.stringify({ messages: conversationMessages || [], systemPrompt: systemPrompt });
+                return new Promise(function(resolve, reject){
+                  window.__starNativePending[id] = { resolve: resolve, reject: reject };
+                  window.StarNative.askGemini(id, payload);
+                });
+              };
+            });
             </script>
         """.trimIndent()
         return if (html.contains("</head>", ignoreCase = true)) {
@@ -213,6 +236,78 @@ class MainActivity : ComponentActivity() {
             )
         }
         return array.toString()
+    }
+
+    private fun decodeApiKey(): String {
+        val mask = byteArrayOf(
+            0x53, 0x74, 0x61, 0x72, 0x41, 0x49, 0x2D, 0x4F, 0x66, 0x66, 0x6C, 0x69, 0x6E, 0x65, 0x21
+        )
+        val cipher = Base64.decode(BuildConfig.STAR_AI_KEY_BLOB, Base64.DEFAULT)
+        val decoded = ByteArray(cipher.size) { index ->
+            (cipher[index].toInt() xor mask[index % mask.size].toInt()).toByte()
+        }
+        return decoded.toString(Charsets.UTF_8)
+    }
+
+    private fun callGemini(payloadJson: String): String {
+        val key = decodeApiKey()
+        if (!key.startsWith("AQ.")) throw IllegalStateException("Gemini key is not configured")
+
+        val payload = JSONObject(payloadJson)
+        val inputMessages = payload.optJSONArray("messages") ?: JSONArray()
+        val contents = JSONArray()
+        for (i in 0 until inputMessages.length()) {
+            val item = inputMessages.optJSONObject(i) ?: continue
+            val role = item.optString("role")
+            if (role != "user" && role != "star" && role != "assistant" && role != "model") continue
+            val text = item.optString("text").ifBlank { item.optString("content") }
+            if (text.isBlank()) continue
+            contents.put(
+                JSONObject()
+                    .put("role", if (role == "user") "user" else "model")
+                    .put("parts", JSONArray().put(JSONObject().put("text", text)))
+            )
+        }
+
+        val request = JSONObject().put("contents", contents)
+        val systemPrompt = payload.optString("systemPrompt")
+        if (systemPrompt.isNotBlank()) {
+            request.put(
+                "systemInstruction",
+                JSONObject().put("parts", JSONArray().put(JSONObject().put("text", systemPrompt)))
+            )
+        }
+
+        val connection = (URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent").openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 20_000
+            readTimeout = 60_000
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("x-goog-api-key", key)
+        }
+
+        connection.outputStream.use { it.write(request.toString().toByteArray(Charsets.UTF_8)) }
+        val code = connection.responseCode
+        val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+        val raw = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+        connection.disconnect()
+        if (code !in 200..299) throw IllegalStateException("Gemini request failed ($code)")
+
+        val response = JSONObject(raw)
+        val candidates = response.optJSONArray("candidates") ?: throw IllegalStateException("Gemini returned no candidates")
+        val parts = candidates.optJSONObject(0)
+            ?.optJSONObject("content")
+            ?.optJSONArray("parts")
+            ?: throw IllegalStateException("Gemini returned no text")
+        val text = buildString {
+            for (i in 0 until parts.length()) {
+                val partText = parts.optJSONObject(i)?.optString("text").orEmpty()
+                if (partText.isNotBlank()) append(partText)
+            }
+        }.trim()
+        if (text.isBlank()) throw IllegalStateException("Gemini returned an empty response")
+        return text
     }
 
     private fun requestSpeech() {
@@ -254,6 +349,17 @@ class MainActivity : ComponentActivity() {
         textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "star-ai-response")
     }
 
+    private fun deliverGeminiResult(requestId: String, ok: Boolean, payload: String) {
+        val idJson = JSONObject.quote(requestId)
+        val payloadJson = JSONObject.quote(payload)
+        runOnUiThread {
+            webView.evaluateJavascript(
+                "window.__starNativeResolve && window.__starNativeResolve($idJson, ${if (ok) "true" else "false"}, $payloadJson);",
+                null
+            )
+        }
+    }
+
     override fun onDestroy() {
         filePathCallback?.onReceiveValue(null)
         filePathCallback = null
@@ -281,7 +387,16 @@ class MainActivity : ComponentActivity() {
         }
 
         @JavascriptInterface
-        fun isApiKeyConfigured(): Boolean = BuildConfig.STAR_AI_API_KEY.isNotBlank()
+        fun isApiKeyConfigured(): Boolean = decodeApiKey().startsWith("AQ.")
+
+        @JavascriptInterface
+        fun askGemini(requestId: String, payloadJson: String) {
+            Thread {
+                runCatching { callGemini(payloadJson) }
+                    .onSuccess { deliverGeminiResult(requestId, true, it) }
+                    .onFailure { deliverGeminiResult(requestId, false, it.message ?: "Gemini request failed") }
+            }.start()
+        }
 
         @JavascriptInterface
         fun appVersion(): String = BuildConfig.VERSION_NAME
