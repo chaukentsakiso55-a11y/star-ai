@@ -36,8 +36,8 @@ android {
         applicationId = "com.cyberpulse.starAI"
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "1.1.3"
+        versionCode = 8
+        versionName = "1.1.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "STAR_AI_KEY_BLOB", "\"$starKeyBlob\"")
         buildConfigField("String", "STAR_ROUTE_B_KEY_BLOB", "\"$starRouteBKeyBlob\"")
@@ -68,26 +68,6 @@ android {
 
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
-    }
-}
-
-// Wire the secondary native route into the existing bridge at build time.
-// This keeps the checked-in UI and HTML free of provider-specific details.
-tasks.matching { it.name == "preBuild" }.configureEach {
-    doFirst {
-        val source = file("src/main/java/com/cyberpulse/starai/MainActivity.kt")
-        if (source.exists()) {
-            val original = source.readText()
-            val needle = "runCatching { callGemini(payloadJson) }\n                    .onSuccess"
-            if (original.contains(needle) && !original.contains("StarRouteFallback.call(payloadJson)")) {
-                source.writeText(
-                    original.replace(
-                        needle,
-                        "runCatching { callGemini(payloadJson) }\n                    .recoverCatching { StarRouteFallback.call(payloadJson) }\n                    .onSuccess"
-                    )
-                )
-            }
-        }
     }
 }
 
