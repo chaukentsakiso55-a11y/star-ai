@@ -117,6 +117,11 @@ class MainActivity : ComponentActivity() {
                 }
                 return false
             }
+
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                installNativeLiveBridge()
+            }
         }
         webView.webChromeClient = object : WebChromeClient() {
             override fun onShowFileChooser(
@@ -202,20 +207,26 @@ class MainActivity : ComponentActivity() {
               delete window.__starNativePending[id];
               if(ok) pending.resolve(payload); else pending.reject(new Error(payload));
             };
-            window.addEventListener('load', function(){
+            window.__installStarNativeLive = function(){
               window.callLiveAPI = function(conversationMessages){
-                if(!window.StarNative || !window.StarNative.askGemini){
-                  return Promise.reject(new Error('Native Gemini bridge unavailable'));
+                if(!window.StarNative || !window.StarNative.askLive){
+                  return Promise.reject(new Error('Native live AI bridge unavailable'));
                 }
-                var id = 'g' + Date.now() + Math.random().toString(16).slice(2);
+                var id = 's' + Date.now() + Math.random().toString(16).slice(2);
                 var systemPrompt = (typeof state !== 'undefined' && state.systemPrompt) ? state.systemPrompt : '';
                 var payload = JSON.stringify({ messages: conversationMessages || [], systemPrompt: systemPrompt });
                 return new Promise(function(resolve, reject){
                   window.__starNativePending[id] = { resolve: resolve, reject: reject };
-                  window.StarNative.askGemini(id, payload);
+                  window.StarNative.askLive(id, payload);
                 });
               };
-            });
+              try {
+                if(typeof updateConnectionStatus === 'function') {
+                  updateConnectionStatus(!!(window.StarNative && window.StarNative.isApiKeyConfigured()));
+                }
+              } catch(_) {}
+            };
+            window.addEventListener('load', function(){ window.__installStarNativeLive(); });
             </script>
         """.trimIndent()
         return if (html.contains("</head>", ignoreCase = true)) {
@@ -223,6 +234,13 @@ class MainActivity : ComponentActivity() {
         } else {
             "$script\n$html"
         }
+    }
+
+    private fun installNativeLiveBridge() {
+        webView.evaluateJavascript(
+            "window.__installStarNativeLive && window.__installStarNativeLive();",
+            null
+        )
     }
 
     private fun librarySourcesJson(): String {
@@ -249,9 +267,9 @@ class MainActivity : ComponentActivity() {
         return decoded.toString(Charsets.UTF_8)
     }
 
-    private fun callGemini(payloadJson: String): String {
+    private fun callPrimaryRoute(payloadJson: String): String {
         val key = decodeApiKey()
-        if (!key.startsWith("AQ.")) throw IllegalStateException("Gemini key is not configured")
+        if (!key.startsWith("AQ.")) throw IllegalStateException("Primary live route is not configured")
 
         val payload = JSONObject(payloadJson)
         val inputMessages = payload.optJSONArray("messages") ?: JSONArray()
@@ -292,22 +310,28 @@ class MainActivity : ComponentActivity() {
         val stream = if (code in 200..299) connection.inputStream else connection.errorStream
         val raw = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
         connection.disconnect()
-        if (code !in 200..299) throw IllegalStateException("Gemini request failed ($code)")
+        if (code !in 200..299) throw IllegalStateException("Primary live route unavailable ($code)")
 
         val response = JSONObject(raw)
-        val candidates = response.optJSONArray("candidates") ?: throw IllegalStateException("Gemini returned no candidates")
+        val candidates = response.optJSONArray("candidates") ?: throw IllegalStateException("Primary live route returned no result")
         val parts = candidates.optJSONObject(0)
             ?.optJSONObject("content")
             ?.optJSONArray("parts")
-            ?: throw IllegalStateException("Gemini returned no text")
+            ?: throw IllegalStateException("Primary live route returned no text")
         val text = buildString {
             for (i in 0 until parts.length()) {
                 val partText = parts.optJSONObject(i)?.optString("text").orEmpty()
                 if (partText.isNotBlank()) append(partText)
             }
         }.trim()
-        if (text.isBlank()) throw IllegalStateException("Gemini returned an empty response")
+        if (text.isBlank()) throw IllegalStateException("Primary live route returned an empty result")
         return text
+    }
+
+    private fun callLiveRoute(payloadJson: String): String {
+        return runCatching { StarRouteFallback.call(payloadJson) }
+            .recoverCatching { callPrimaryRoute(payloadJson) }
+            .getOrThrow()
     }
 
     private fun requestSpeech() {
@@ -349,7 +373,7 @@ class MainActivity : ComponentActivity() {
         textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "star-ai-response")
     }
 
-    private fun deliverGeminiResult(requestId: String, ok: Boolean, payload: String) {
+    private fun deliverLiveResult(requestId: String, ok: Boolean, payload: String) {
         val idJson = JSONObject.quote(requestId)
         val payloadJson = JSONObject.quote(payload)
         runOnUiThread {
@@ -387,14 +411,14 @@ class MainActivity : ComponentActivity() {
         }
 
         @JavascriptInterface
-        fun isApiKeyConfigured(): Boolean = decodeApiKey().startsWith("AQ.")
+        fun isApiKeyConfigured(): Boolean = StarRouteFallback.isConfigured() || decodeApiKey().startsWith("AQ.")
 
         @JavascriptInterface
-        fun askGemini(requestId: String, payloadJson: String) {
+        fun askLive(requestId: String, payloadJson: String) {
             Thread {
-                runCatching { callGemini(payloadJson) }
-                    .onSuccess { deliverGeminiResult(requestId, true, it) }
-                    .onFailure { deliverGeminiResult(requestId, false, it.message ?: "Gemini request failed") }
+                runCatching { callLiveRoute(payloadJson) }
+                    .onSuccess { deliverLiveResult(requestId, true, it) }
+                    .onFailure { deliverLiveResult(requestId, false, it.message ?: "Live AI request failed") }
             }.start()
         }
 
