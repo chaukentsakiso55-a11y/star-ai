@@ -20,9 +20,15 @@ internal object StarRouteFallback {
         return plain.toString(Charsets.UTF_8)
     }
 
+    fun isConfigured(): Boolean = runCatching {
+        decode(BuildConfig.STAR_ROUTE_B_KEY_BLOB).startsWith("sk-") &&
+            decode(BuildConfig.STAR_ROUTE_B_URL_BLOB).startsWith("https://") &&
+            decode(BuildConfig.STAR_ROUTE_B_MODEL_BLOB).isNotBlank()
+    }.getOrDefault(false)
+
     fun call(payloadJson: String): String {
         val key = decode(BuildConfig.STAR_ROUTE_B_KEY_BLOB)
-        if (!key.startsWith("sk-")) throw IllegalStateException("Secondary route is not configured")
+        if (!key.startsWith("sk-")) throw IllegalStateException("Live route is not configured")
 
         val endpoint = decode(BuildConfig.STAR_ROUTE_B_URL_BLOB)
         val model = decode(BuildConfig.STAR_ROUTE_B_MODEL_BLOB)
@@ -54,6 +60,7 @@ internal object StarRouteFallback {
         val request = JSONObject()
             .put("model", model)
             .put("messages", outgoing)
+            .put("stream", false)
 
         val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
@@ -62,6 +69,8 @@ internal object StarRouteFallback {
             doOutput = true
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("Authorization", "Bearer $key")
+            setRequestProperty("HTTP-Referer", "https://cyber-pulse-info.netlify.app")
+            setRequestProperty("X-Title", "Star AI")
         }
 
         connection.outputStream.use { stream ->
@@ -73,14 +82,25 @@ internal object StarRouteFallback {
         val raw = responseStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
         connection.disconnect()
 
-        if (code !in 200..299) throw IllegalStateException("Secondary route unavailable ($code)")
+        if (code !in 200..299) throw IllegalStateException("Live route unavailable ($code)")
 
         val response = JSONObject(raw)
         val choice = response.optJSONArray("choices")?.optJSONObject(0)
-            ?: throw IllegalStateException("Secondary route returned no result")
+            ?: throw IllegalStateException("Live route returned no result")
         val message = choice.optJSONObject("message")
-        val content = message?.optString("content").orEmpty().ifBlank { choice.optString("text") }
-        if (content.isBlank()) throw IllegalStateException("Secondary route returned an empty result")
+        val rawContent = message?.opt("content")
+        val content = when (rawContent) {
+            is String -> rawContent
+            is JSONArray -> buildString {
+                for (i in 0 until rawContent.length()) {
+                    val part = rawContent.optJSONObject(i)
+                    val text = part?.optString("text").orEmpty()
+                    if (text.isNotBlank()) append(text)
+                }
+            }
+            else -> choice.optString("text")
+        }.trim()
+        if (content.isBlank()) throw IllegalStateException("Live route returned an empty result")
         return content
     }
 }
