@@ -36,6 +36,7 @@ class MainActivity : ComponentActivity() {
     private var textToSpeech: TextToSpeech? = null
     private var ttsReady = false
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
+    private val stateStore by lazy { StarStateStore(this) }
 
     private val librarySources = listOf(
         LibrarySource(
@@ -120,7 +121,7 @@ class MainActivity : ComponentActivity() {
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
-                installNativeLiveBridge()
+                installNativeRuntimeBridge()
             }
         }
         webView.webChromeClient = object : WebChromeClient() {
@@ -148,7 +149,7 @@ class MainActivity : ComponentActivity() {
         setContentView(webView)
         webView.loadDataWithBaseURL(
             "https://star.local/",
-            injectRuntimeConfig(decodeStarHtml()),
+            injectRuntimeConfig(patchHtmlRuntime(decodeStarHtml())),
             "text/html",
             "UTF-8",
             null
@@ -190,6 +191,66 @@ class MainActivity : ComponentActivity() {
             .use { it.readText() }
     }
 
+    private fun patchHtmlRuntime(html: String): String {
+        var patched = html.replace(
+            "replyText = await callLiveAPI(messages);",
+            "replyText = await window.__starLiveCall(messages);"
+        )
+
+        val marker = "const ACCENTS = {"
+        val persistence = """
+            // STAR native persistence: restore real user-created state before init().
+            try {
+              if(window.StarNative && window.StarNative.loadAppState){
+                const savedRaw = window.StarNative.loadAppState();
+                if(savedRaw){
+                  const saved = JSON.parse(savedRaw);
+                  if(Array.isArray(saved.conversations)) state.conversations = saved.conversations;
+                  if(Array.isArray(saved.notifications)) state.notifications = saved.notifications;
+                  if(Array.isArray(saved.studySubjects)) state.studySubjects = saved.studySubjects;
+                  if(Array.isArray(saved.scienceProjects)) state.scienceProjects = saved.scienceProjects;
+                  if(Array.isArray(saved.myProjects)) state.myProjects = saved.myProjects;
+                  if(Array.isArray(saved.learnedRules)) state.learnedRules = saved.learnedRules;
+                  if(typeof saved.systemPrompt === 'string' && saved.systemPrompt.trim()) state.systemPrompt = saved.systemPrompt;
+                  if(typeof saved.accent === 'string' && saved.accent) state.accent = saved.accent;
+                }
+                if(window.StarNative.isApiKeyConfigured){
+                  state.apiLive = !!window.StarNative.isApiKeyConfigured();
+                }
+              }
+            } catch(_) {}
+
+            window.__starPersistNow = function(){
+              try {
+                if(!window.StarNative || !window.StarNative.saveAppState) return false;
+                const snapshot = {
+                  conversations: state.conversations,
+                  notifications: state.notifications,
+                  studySubjects: state.studySubjects,
+                  scienceProjects: state.scienceProjects,
+                  myProjects: state.myProjects,
+                  learnedRules: state.learnedRules,
+                  systemPrompt: state.systemPrompt,
+                  accent: state.accent,
+                  savedAt: Date.now()
+                };
+                return !!window.StarNative.saveAppState(JSON.stringify(snapshot));
+              } catch(_) {
+                return false;
+              }
+            };
+            window.setInterval(function(){ window.__starPersistNow(); }, 1000);
+            document.addEventListener('visibilitychange', function(){
+              if(document.visibilityState === 'hidden') window.__starPersistNow();
+            });
+        """.trimIndent()
+
+        if (patched.contains(marker)) {
+            patched = patched.replaceFirst(marker, "$persistence\n\n$marker")
+        }
+        return patched
+    }
+
     private fun injectRuntimeConfig(html: String): String {
         val sourcesJson = librarySourcesJson()
         val script = """
@@ -207,26 +268,23 @@ class MainActivity : ComponentActivity() {
               delete window.__starNativePending[id];
               if(ok) pending.resolve(payload); else pending.reject(new Error(payload));
             };
-            window.__installStarNativeLive = function(){
-              window.callLiveAPI = function(conversationMessages){
-                if(!window.StarNative || !window.StarNative.askLive){
-                  return Promise.reject(new Error('Native live AI bridge unavailable'));
-                }
-                var id = 's' + Date.now() + Math.random().toString(16).slice(2);
-                var systemPrompt = (typeof state !== 'undefined' && state.systemPrompt) ? state.systemPrompt : '';
-                var payload = JSON.stringify({ messages: conversationMessages || [], systemPrompt: systemPrompt });
-                return new Promise(function(resolve, reject){
-                  window.__starNativePending[id] = { resolve: resolve, reject: reject };
-                  window.StarNative.askLive(id, payload);
-                });
-              };
-              try {
-                if(typeof updateConnectionStatus === 'function') {
-                  updateConnectionStatus(!!(window.StarNative && window.StarNative.isApiKeyConfigured()));
-                }
-              } catch(_) {}
+            window.__starLiveCall = function(conversationMessages){
+              if(!window.StarNative || !window.StarNative.askLive){
+                return Promise.reject(new Error('Live AI bridge unavailable'));
+              }
+              var id = 's' + Date.now() + Math.random().toString(16).slice(2);
+              var systemPrompt = '';
+              try { systemPrompt = (typeof state !== 'undefined' && state.systemPrompt) ? state.systemPrompt : ''; } catch(_) {}
+              var payload = JSON.stringify({ messages: conversationMessages || [], systemPrompt: systemPrompt });
+              return new Promise(function(resolve, reject){
+                window.__starNativePending[id] = { resolve: resolve, reject: reject };
+                window.StarNative.askLive(id, payload);
+              });
             };
-            window.addEventListener('load', function(){ window.__installStarNativeLive(); });
+            window.__installStarNativeRuntime = function(){
+              if(!window.__starLiveCall) return false;
+              return true;
+            };
             </script>
         """.trimIndent()
         return if (html.contains("</head>", ignoreCase = true)) {
@@ -236,9 +294,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun installNativeLiveBridge() {
+    private fun installNativeRuntimeBridge() {
         webView.evaluateJavascript(
-            "window.__installStarNativeLive && window.__installStarNativeLive();",
+            "window.__installStarNativeRuntime && window.__installStarNativeRuntime();",
             null
         )
     }
@@ -384,6 +442,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onPause() {
+        if (::webView.isInitialized) {
+            webView.evaluateJavascript("window.__starPersistNow && window.__starPersistNow();", null)
+        }
+        super.onPause()
+    }
+
     override fun onDestroy() {
         filePathCallback?.onReceiveValue(null)
         filePathCallback = null
@@ -420,6 +485,17 @@ class MainActivity : ComponentActivity() {
                     .onSuccess { deliverLiveResult(requestId, true, it) }
                     .onFailure { deliverLiveResult(requestId, false, it.message ?: "Live AI request failed") }
             }.start()
+        }
+
+        @JavascriptInterface
+        fun saveAppState(json: String): Boolean = stateStore.save(json)
+
+        @JavascriptInterface
+        fun loadAppState(): String = stateStore.load()
+
+        @JavascriptInterface
+        fun clearAppState() {
+            stateStore.clear()
         }
 
         @JavascriptInterface
