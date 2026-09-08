@@ -36,8 +36,8 @@ android {
         applicationId = "com.cyberpulse.starAI"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "1.1.4"
+        versionCode = 9
+        versionName = "1.1.5"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "STAR_AI_KEY_BLOB", "\"$starKeyBlob\"")
         buildConfigField("String", "STAR_ROUTE_B_KEY_BLOB", "\"$starRouteBKeyBlob\"")
